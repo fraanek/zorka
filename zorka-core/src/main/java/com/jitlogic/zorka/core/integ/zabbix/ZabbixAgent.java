@@ -46,7 +46,7 @@ public class ZabbixAgent extends AbstractTcpAgent {
 
     @Override
     protected ZorkaRequestHandler newRequest(Socket sock) {
-        return new ZabbixRequestHandler(sock, translator);
+        return new ZabbixRequestHandler(sock, translator, accessLog, accessLogFilter);
     }
 
 }

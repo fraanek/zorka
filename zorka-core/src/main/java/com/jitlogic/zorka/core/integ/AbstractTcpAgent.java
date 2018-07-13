@@ -17,11 +17,16 @@ package com.jitlogic.zorka.core.integ;
 
 import com.jitlogic.zorka.common.ZorkaService;
 import com.jitlogic.zorka.common.stats.AgentDiagnostics;
+import com.jitlogic.zorka.common.util.FileTrapper;
 import com.jitlogic.zorka.core.ZorkaBshAgent;
 import com.jitlogic.zorka.common.util.ZorkaConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.impl.ZorkaLogLevel;
+import org.slf4j.impl.ZorkaTrapperLogger;
+import org.slf4j.spi.LocationAwareLogger;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
@@ -43,6 +48,12 @@ public abstract class AbstractTcpAgent implements Runnable, ZorkaService {
      * Logger
      */
     private final Logger log = LoggerFactory.getLogger(this.getClass());
+
+    protected ZorkaTrapperLogger accessLog;
+
+    protected String accessLogFilter;
+
+    private FileTrapper trapper;
 
     /**
      * BSH agent
@@ -103,8 +114,7 @@ public abstract class AbstractTcpAgent implements Runnable, ZorkaService {
      * @param defaultAddr
      * @param defaultPort agent default port
      */
-    public AbstractTcpAgent(ZorkaConfig config, ZorkaBshAgent agent, QueryTranslator translator,
-                            String prefix, String defaultAddr, int defaultPort) {
+    public AbstractTcpAgent(ZorkaConfig config, ZorkaBshAgent agent, QueryTranslator translator, String prefix, String defaultAddr, int defaultPort) {
 
         this.agent = agent;
         this.prefix = prefix;
@@ -138,8 +148,22 @@ public abstract class AbstractTcpAgent implements Runnable, ZorkaService {
                 log.error("Cannot parse " + prefix + ".server.addr in zorka.properties", e);
             }
         }
-    }
 
+        String logDir = config.getLogDir();
+        String logFileName = config.stringCfg("zorka.accesslog.fname", "zorka-access.log");
+
+        trapper = FileTrapper.daily(ZorkaLogLevel.INFO, new File(logDir, logFileName).getPath(), false);
+        trapper.disableTrapCounter();
+        trapper.start();
+        boolean accessLoggingEnabled = config.boolCfg("zorka.accesslog.enabled", false);
+        accessLogFilter = config.stringCfg("zorka.accesslog.filter", "");
+        if(accessLoggingEnabled) {
+            accessLog = new ZorkaTrapperLogger("ACCESS_LOG", LocationAwareLogger.DEBUG_INT, trapper);
+        } else {
+            accessLog = new ZorkaTrapperLogger("ACCESS_LOG", LocationAwareLogger.ERROR_INT, trapper);
+        }
+
+    }
 
     /**
      * Opens socket and starts agent thread.
@@ -159,7 +183,6 @@ public abstract class AbstractTcpAgent implements Runnable, ZorkaService {
             }
         }
     }
-
 
     /**
      * Stops agent thread and closes socket.
@@ -190,6 +213,10 @@ public abstract class AbstractTcpAgent implements Runnable, ZorkaService {
             } catch (IOException e) {
                 log.error("I/O error in zabbix core main loop: " + e.getMessage());
             }
+        }
+        if (trapper != null) {
+            trapper.close();
+            trapper = null;
         }
     }
 
@@ -251,7 +278,6 @@ public abstract class AbstractTcpAgent implements Runnable, ZorkaService {
         thread = null;
 
     }
-
 
     private boolean allowedAddr(Socket sock) {
 

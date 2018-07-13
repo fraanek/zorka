@@ -17,17 +17,17 @@
 
 package com.jitlogic.zorka.core.integ.zabbix;
 
-
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.Socket;
-
 import com.jitlogic.zorka.common.stats.AgentDiagnostics;
 import com.jitlogic.zorka.core.integ.QueryTranslator;
 import com.jitlogic.zorka.core.integ.ZorkaRequestHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.impl.ZorkaTrapperLogger;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.Socket;
 
 /**
  * Zabbix request handler is used by ZabbixAgent thread to parse queries from zabbix server and format responses.
@@ -52,6 +52,10 @@ public class ZabbixRequestHandler implements ZorkaRequestHandler {
 
     private QueryTranslator translator;
 
+    private ZorkaTrapperLogger accessLog;
+
+    private String accessLogFilter;
+
     /**
      * Timestamps of beginning and end of request handling.
      */
@@ -62,38 +66,35 @@ public class ZabbixRequestHandler implements ZorkaRequestHandler {
      */
     public static final String ZBX_NOTSUPPORTED = "ZBX_NOTSUPPORTED";
 
-
     /**
      * Standard constructor
      *
      * @param socket open socket (result from ServerSocket.accept())
      */
-    public ZabbixRequestHandler(Socket socket, QueryTranslator translator) {
+    public ZabbixRequestHandler(Socket socket, QueryTranslator translator, ZorkaTrapperLogger accessLog, String accessLogFilter) {
         this.socket = socket;
         this.translator = translator;
+        this.accessLog = accessLog;
+        this.accessLogFilter = accessLogFilter;
         this.tStart = System.nanoTime();
 
         AgentDiagnostics.inc(AgentDiagnostics.ZABBIX_REQUESTS);
     }
 
-
     /**
      * Zabbix protocol header magic number
      */
-    private static final byte[] header = {0x5a, 0x42, 0x58, 0x44, 0x01};
-
+    private static final byte[] header = { 0x5a, 0x42, 0x58, 0x44, 0x01 };
 
     /**
      * Zabbix header length
      */
     private static final int HDR_LEN = 13;
 
-
     /**
      * Maximum request length
      */
     private static final int MAX_REQUEST_LENGTH = 1024;
-
 
     /**
      * Receives and decodes zabbix request
@@ -105,7 +106,6 @@ public class ZabbixRequestHandler implements ZorkaRequestHandler {
     public static String decode(InputStream in) throws IOException {
         byte[] buf = new byte[MAX_REQUEST_LENGTH + HDR_LEN];
         int pos = 0;
-
 
         for (int b = in.read(); b != -1 && pos < buf.length; b = in.read()) {
             buf[pos++] = (byte) b;
@@ -168,8 +168,7 @@ public class ZabbixRequestHandler implements ZorkaRequestHandler {
     /**
      * TODO remove either this or above header constant
      */
-    private static final byte[] zbx_hdr = {(byte) 'Z', (byte) 'B', (byte) 'X', (byte) 'D', 0x01};
-
+    private static final byte[] zbx_hdr = { (byte) 'Z', (byte) 'B', (byte) 'X', (byte) 'D', 0x01 };
 
     /**
      * Translates zabbix query to beanshell call
@@ -178,41 +177,40 @@ public class ZabbixRequestHandler implements ZorkaRequestHandler {
      *
      * @return query ready to be passed to bsh agent
      */
-//	public static String translate(String query) {
-//		StringBuilder sb = new StringBuilder(query.length());
-//		int pos = 0;
-//
-//		while (pos < query.length() && query.charAt(pos) != '[') {
-//			pos++;
-//		}
-//
-//		sb.append(query.substring(0, pos).replace("__", "."));
-//
-//		if (pos >= query.length()) {
-//			return sb.toString();
-//		}
-//
-//		sb.append('(');
-//        pos++;
-//
-//		while (pos < query.length() && query.charAt(pos) != ']') {
-//			if (query.charAt(pos) == '"') {
-//				int pstart = pos++;
-//				while (pos < query.length() && query.charAt(pos) != '"') {
-//					pos++;
-//				}
-//				sb.append(query.substring(pstart, pos+1));
-//			} else {
-//				sb.append(query.charAt(pos));
-//			}
-//			pos++;
-//		}
-//
-//		sb.append(')');
-//
-//		return sb.toString();
-//	}
-
+    //	public static String translate(String query) {
+    //		StringBuilder sb = new StringBuilder(query.length());
+    //		int pos = 0;
+    //
+    //		while (pos < query.length() && query.charAt(pos) != '[') {
+    //			pos++;
+    //		}
+    //
+    //		sb.append(query.substring(0, pos).replace("__", "."));
+    //
+    //		if (pos >= query.length()) {
+    //			return sb.toString();
+    //		}
+    //
+    //		sb.append('(');
+    //        pos++;
+    //
+    //		while (pos < query.length() && query.charAt(pos) != ']') {
+    //			if (query.charAt(pos) == '"') {
+    //				int pstart = pos++;
+    //				while (pos < query.length() && query.charAt(pos) != '"') {
+    //					pos++;
+    //				}
+    //				sb.append(query.substring(pstart, pos+1));
+    //			} else {
+    //				sb.append(query.charAt(pos));
+    //			}
+    //			pos++;
+    //		}
+    //
+    //		sb.append(')');
+    //
+    //		return sb.toString();
+    //	}
 
     /**
      * Constructs and sends response
@@ -243,7 +241,6 @@ public class ZabbixRequestHandler implements ZorkaRequestHandler {
         out.flush();
     } // send()
 
-
     @Override
     public String getReq() throws IOException {
         if (req == null) {
@@ -253,16 +250,18 @@ public class ZabbixRequestHandler implements ZorkaRequestHandler {
         return req;
     } // getReq()
 
-
     @Override
     public void handleResult(Object rslt) {
         try {
             tStop = System.nanoTime();
             log.debug("OK [t=" + (tStop - tStart) / 1000000L + "ms] '" + req + "' -> '" + rslt + "'");
             AgentDiagnostics.inc(AgentDiagnostics.ZABBIX_TIME, tStop - tStart);
-            send(serialize(rslt));
+            String rsltSerialized = serialize(rslt);
+            send(rsltSerialized);
+            logResult(rsltSerialized, socket);
         } catch (IOException e) {
             log.error("I/O error returning result: " + e.getMessage());
+            logError(e.getMessage(), socket);
         } finally {
             try {
                 socket.close();
@@ -271,7 +270,6 @@ public class ZabbixRequestHandler implements ZorkaRequestHandler {
             }
         }
     }
-
 
     /**
      * Serializes response. If it is JSON object, it will be serialized using toJSONString() method.
@@ -285,7 +283,6 @@ public class ZabbixRequestHandler implements ZorkaRequestHandler {
         return obj != null ? obj.toString() : ZBX_NOTSUPPORTED;
     }
 
-
     @Override
     public void handleError(Throwable e) {
         AgentDiagnostics.inc(AgentDiagnostics.ZABBIX_ERRORS);
@@ -294,8 +291,10 @@ public class ZabbixRequestHandler implements ZorkaRequestHandler {
             log.error("ERROR [t=" + (tStop - tStart) / 1000000L + "ms] + '" + req + "'", e);
             AgentDiagnostics.inc(AgentDiagnostics.ZABBIX_TIME, tStop - tStart);
             send(ZBX_NOTSUPPORTED);
+            logError(ZBX_NOTSUPPORTED, socket);
         } catch (IOException e1) {
             log.error("I/O Error returning (error) result: " + e.getMessage());
+            logError(e1.getMessage(), socket);
         } finally {
             try {
                 socket.close();
@@ -303,5 +302,36 @@ public class ZabbixRequestHandler implements ZorkaRequestHandler {
                 log.error("I/O error closing socket.", e2);
             }
         }
+    }
+
+    private void logResult(final String result, Socket socket) {
+        if(accessLogFilter == null || accessLogFilter.isEmpty() || req.matches(accessLogFilter)) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("[").append(socket.getInetAddress().getHostAddress()).append("]").append(" OK ").append(req).append(" | ").append(truncate(result, 32));
+            accessLog.debug(sb.toString());
+        }
+    }
+
+    private void logError(final String error, Socket socket) {
+        if(accessLogFilter == null || accessLogFilter.isEmpty() || req.matches(accessLogFilter)) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("[").append(socket.getInetAddress().getHostAddress()).append("]").append(" ERROR ").append(req);
+            accessLog.debug(sb.toString());
+        }
+    }
+
+    private String truncate(final String str, final int maxWidth) {
+        if (maxWidth < 0) {
+            throw new IllegalArgumentException("maxWith cannot be negative");
+        }
+        if (str == null) {
+            return null;
+        }
+
+        if (str.length() > maxWidth) {
+            final int ix = maxWidth;
+            return str.substring(0, ix);
+        }
+        return str;
     }
 }
